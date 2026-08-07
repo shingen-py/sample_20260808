@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+# 秘密情報は除外する。ただし配色設定は共有しないと、
+# 人によってダークテーマで表示されて文字が読めなくなる。
+.streamlit/*
+!.streamlit/config.toml
+CLAUDE.local.md

@@ -1,0 +1,13 @@
+# 画面の配色。ui_styles.py の COLORS と同じ値にすること。
+#
+# ここを書かないと、閲覧する人の環境によってダークテーマで表示される。
+# ui_styles.py は明るい背景を前提に文字色を決めているため、
+# ダークだと暗い背景に暗い文字が乗って読めなくなる。
+
+[theme]
+base = "light"
+primaryColor = "#315B45"
+backgroundColor = "#F6F7F4"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#17201A"
+font = "sans serif"
