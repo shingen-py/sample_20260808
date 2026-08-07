@@ -1,0 +1,74 @@
+# 山梨県のクマ目撃データを毎日取り直す。
+#
+# 決めたこと:
+#
+# 1. 取得日は毎回書き直す。データが変わらない日もコミットが入る。
+#    データが変わった日だけにすると履歴はきれいだが、クマの目撃は
+#    冬季に途絶えることがある。目撃が増えない日が60日続くと、
+#    GitHubが定期実行を自動で止めてしまい、再開に人の操作が要る。
+#    止まらないことを優先する。
+#
+# 2. 取得のあとにテストを実行し、通ったときだけコミットする。
+#    データがおかしくなったまま画面へ出さないため。
+#
+# 3. 時刻はJSTで扱う。runnerの既定はUTCで、日本時間の朝に動かすと
+#    前日の日付が記録されてしまう。
+
+name: データを毎日更新する
+
+on:
+  schedule:
+    # UTCで書く。21:00 UTC = 翌日6:00 JST
+    - cron: "0 21 * * *"
+  # 手動でも動かせるようにする。止まったときの再開に使う。
+  workflow_dispatch:
+
+# コミットしてpushするために書き込みを許可する
+permissions:
+  contents: write
+
+# 同時に走らせない。二重にコミットしないため。
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Tokyo
+
+    steps:
+      - name: リポジトリを取り出す
+        uses: actions/checkout@v4
+
+      - name: Pythonを用意する
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: データを取得する
+        # 取得は標準ライブラリだけで動くので、先に実行する。
+        # 取れなかった日はここで止まり、今あるデータは残る。
+        run: python scripts/fetch_data.py
+
+      - name: 依存をインストールする
+        run: python -m pip install --upgrade pip -r requirements.txt
+
+      - name: テストを実行する
+        # 取れたデータでアプリが壊れないかを確かめる。
+        # ここが落ちたらコミットしない。
+        run: python -m unittest discover -s tests
+
+      - name: 変更があればコミットする
+        run: |
+          git add data
+          if git diff --cached --quiet; then
+            echo "データにも取得日にも変更がありませんでした。"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "データを自動更新（$(date +%Y-%m-%d) 取得）"
+          git push

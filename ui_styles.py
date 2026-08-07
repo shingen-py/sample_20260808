@@ -754,6 +754,101 @@ def legend_html(rows: list[tuple[str, str, int]]) -> str:
     )
 
 
+DISCLAIMER_TITLE = "ご利用にあたって"
+
+# 安全に関わる注意。折りたたみの中に隠さず、開かなくても読める場所に出す。
+# 「この地図について」にも詳しい版を置くが、要点はここで必ず目に入るようにする。
+DISCLAIMER_ITEMS = (
+    "地図上の位置は、目撃地点のおおよその目安です。"
+    "通学路の何メートル横か、といった精度の判断には使えません。",
+    "1日1回の更新です。山梨県の公表より遅れます。"
+    "緊急時や最新の情報は、山梨県や市町村の公式発表を確認してください。",
+    "この情報に頼った結果について、作成者は責任を負いません。",
+    "吹き出しの「状況」は、山梨県が公開しているデータの記述をそのまま掲載しています。"
+    "個人や世帯を特定する目的では利用しないでください。",
+)
+
+
+def disclaimer_html(items: tuple[str, ...] = DISCLAIMER_ITEMS) -> str:
+    """画面下に常時出す免責。開かなくても読める。"""
+
+    lines = "".join(f"<li>{escape(item)}</li>" for item in items)
+
+    return (
+        '<div class="disclaimer">'
+        f'<div class="disclaimer__title">{escape(DISCLAIMER_TITLE)}</div>'
+        f'<ul class="disclaimer__items">{lines}</ul>'
+        "</div>"
+    )
+
+
+# 画面を開いたときに通信する先。利用者のIPアドレスがこれらの相手に渡る。
+# foliumが読み込むもので、こちらのコードで減らすのは難しい。
+#
+# ここに書いた一覧が実際とずれると、画面に書いてあることが嘘になる。
+# `tests/test_external_hosts.py`が、実際に生成されるHTMLと突き合わせる。
+EXTERNAL_HOSTS = (
+    ("cdn.jsdelivr.net", "地図を描くプログラム（Leaflet など）"),
+    ("cdnjs.cloudflare.com", "ピンをまとめる機能のプログラム"),
+    ("code.jquery.com", "jQuery（Leaflet が使う）"),
+    ("netdna.bootstrapcdn.com", "アイコン用のスタイル"),
+    ("basemaps.cartocdn.com", "地図の画像。地図を動かすたびに読み込む"),
+)
+
+CONTACT_UNSET_TEXT = "連絡先は公開時に設定します（現在は未設定）。"
+
+
+def privacy_markdown(hosts: tuple[tuple[str, str], ...] = EXTERNAL_HOSTS) -> str:
+    """プライバシーについての説明。
+
+    集めていないことと、外部へ通信していることの両方を書く。
+    「何も集めていません」だけだと、外部への通信を隠すことになる。
+    """
+
+    lines = "\n".join(f"    - `{host}` — {purpose}" for host, purpose in hosts)
+
+    return (
+        "**プライバシーについて**\n\n"
+        "- 氏名や連絡先などを利用者から集めていません。入力欄もログインもありません\n"
+        "- アクセス解析は入れていません\n"
+        "- ただし画面を開くと、次の外部サーバーへ通信します。"
+        "**利用者のIPアドレスとブラウザの情報が、これらの相手に渡ります**\n"
+        f"{lines}\n"
+        "- 画面を配信している事業者が、接続の記録を保持する場合があります\n"
+    )
+
+
+def contact_markdown(url: str = "") -> str:
+    """連絡先。未設定のときは、その旨をはっきり出す。"""
+
+    if not url:
+        destination = f"- {CONTACT_UNSET_TEXT}"
+    else:
+        destination = f"- GitHub の Issues: {url}"
+
+    return (
+        "**連絡先**\n\n"
+        "誤りのご指摘や、掲載内容についてのご相談はこちらへお願いします。\n\n"
+        f"{destination}\n\n"
+        "掲載しているデータは山梨県が公開しているものです。"
+        "元データそのものについては、山梨県 森林環境部 自然共生推進課へお問い合わせください。\n"
+    )
+
+
+def disclaimer_markdown(items: tuple[str, ...] = ()) -> str:
+    """免責の詳しい版。画面下の要点と同じ内容に、出所の話を足す。"""
+
+    lines = "\n".join(f"- {item}" for item in items)
+
+    return (
+        "**ご利用にあたって**\n\n"
+        f"{lines}\n"
+        "- このアプリは山梨県が作成したものではありません\n"
+        "- 山梨県は、提供するデータの完全性や正確性を保証していません"
+        "（山梨県オープンデータ利用規約）\n"
+    )
+
+
 def note_html(text: str) -> str:
     """控えめな注記。警告色は使わず、左の罫線だけで区別する。"""
 
@@ -1085,6 +1180,35 @@ button:focus-visible {{
   margin-top: var(--space-2);
   font-size: 11px;
   color: var(--text-secondary);
+}}
+
+/* 免責。地図の下に常時出す。読み飛ばされない程度に目立たせ、警告色は使わない。 */
+.disclaimer {{
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  background: var(--surface-muted);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}}
+
+.disclaimer__title {{
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+}}
+
+.disclaimer__items {{
+  margin: 0;
+  padding-left: 1.2em;
+}}
+
+.disclaimer__items li {{
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }}
 
 /* 注記。黄色の警告ボックスの代わりに使う。 */

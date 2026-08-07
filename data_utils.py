@@ -251,6 +251,32 @@ def municipality_label(record: dict[str, str]) -> str:
     return record["目撃市町村"].strip() or UNKNOWN_MUNICIPALITY
 
 
+def japanese_date(value: datetime) -> str:
+    """画面に出す日付の書き方をそろえる。"""
+
+    return f"{value.year}年{value.month}月{value.day}日"
+
+
+def fetched_at(path: str | Path) -> datetime | None:
+    """データを取得した日を返す。読めなければNoneを返す。
+
+    ファイルの更新日時は使えない。`git clone`すると
+    クローンした時刻になるため、置いた場所によっては
+    「今日取得した」と表示されてしまう。
+    取得した日そのものを書いたファイルを読む。
+    """
+
+    try:
+        text = Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+    try:
+        return datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def record_date(record: dict[str, str]) -> datetime | None:
     """目撃日を日付として返す。`YYYY/M/D`として読めないときはNoneを返す。"""
 
@@ -417,12 +443,7 @@ def data_period(records: list[dict[str, str]]) -> tuple[str, str] | None:
     if not dates:
         return None
 
-    first, last = min(dates), max(dates)
-
-    return (
-        f"{first.year}年{first.month}月{first.day}日",
-        f"{last.year}年{last.month}月{last.day}日",
-    )
+    return japanese_date(min(dates)), japanese_date(max(dates))
 
 
 def sighting_details(record: dict[str, str]) -> list[tuple[str, str]]:

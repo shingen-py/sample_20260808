@@ -1,5 +1,9 @@
 """山梨県のツキノワグマ目撃情報を、市町村ごとに地図で見る最小Streamlitアプリ。"""
 
+# `int | None`のような書き方をPython 3.9でも使えるようにする。
+# これがないと3.10以上でしか動かず、置く場所を選ぶことになる。
+from __future__ import annotations
+
 from collections import Counter
 from pathlib import Path
 
@@ -19,8 +23,10 @@ from data_utils import (
     date_label,
     days_ago,
     days_ago_label,
+    fetched_at,
     filter_by_municipality,
     filter_by_period,
+    japanese_date,
     load_all_records,
     municipality_counts,
     municipality_label,
@@ -35,6 +41,7 @@ from map_overlays import MARKER_INDEX_OPTION, MapControls, SightingListControl
 from ui_styles import (
     CLUSTER_ICON_JS,
     CLUSTER_OPTIONS,
+    DISCLAIMER_ITEMS,
     FIT_MAX_ZOOM,
     FIT_PADDING,
     MAP_HEIGHT,
@@ -47,11 +54,15 @@ from ui_styles import (
     TONE_COLORS,
     ZOOM_CONTROL_POSITION,
     bear_marker_svg,
+    contact_markdown,
+    disclaimer_html,
+    disclaimer_markdown,
     header_brand_html,
     header_meta_html,
     legend_html,
     note_html,
     popup_card_html,
+    privacy_markdown,
     sighting_list_html,
     summary_html,
 )
@@ -62,6 +73,10 @@ DATA_PATHS = [
     APP_DIR / "data" / "2026kumadata.csv",
     APP_DIR / "data" / "2026kumadata_new.csv",
 ]
+
+# データを取得した日を書いたファイル。`scripts/fetch_data.py`が更新する。
+FETCHED_AT_PATH = APP_DIR / "data" / "fetched_at.txt"
+UNKNOWN_FETCHED_AT = "取得日不明"
 
 # 県全体を映すときの中心と拡大率。市町村を選んだときは目撃地点の範囲へ寄せる。
 YAMANASHI_CENTER = (35.66, 138.57)
@@ -77,30 +92,46 @@ DEFAULT_PERIOD = PERIOD_SEASON
 PERIOD_KEY = "selected_period"
 MUNICIPALITY_KEY = "selected_municipality"
 
-ABOUT_TEXT = """
-市町村を選ぶと、その市町村のツキノワグマ目撃地点を地図で確認できます。
-ピンを押すと、日付・時間・場所・状況・人身被害の有無が読めます。
+# 連絡先。公開する前にGitHubのIssuesのURLを入れる。
+# 空のままだと、画面に「未設定」と出る。
+CONTACT_URL = ""
 
-**このアプリで分からないこと**
-
-- 地図上の位置は目撃地点のおおよその目安です。元データに「大まかな付近を表示した目安」と明記されています
-- 座標がない目撃は地図に出せません。件数はサイドバーに出しています
-- 危険度の判定はしません。データに書かれていないことは表示しません
-- 取得した時点のデータで、自動更新はしません
-"""
+ABOUT_TEXT = "\n\n".join(
+    [
+        (
+            "市町村と期間を選ぶと、ツキノワグマの目撃地点を地図で確認できます。\n"
+            "ピンや一覧の行を押すと、日付・時間・場所・状況・人身被害の有無が読めます。"
+        ),
+        (
+            "**このアプリで分からないこと**\n\n"
+            "- 地図上の位置は目撃地点のおおよその目安です。"
+            "元データに「大まかな付近を表示した目安」と明記されています\n"
+            "- 座標がない目撃は地図に出せません。件数はサイドバーに出しています\n"
+            "- 危険度の判定はしません。データに書かれていないことは表示しません"
+        ),
+        disclaimer_markdown(DISCLAIMER_ITEMS),
+        privacy_markdown(),
+        contact_markdown(CONTACT_URL),
+    ]
+)
 
 DATASET_URL = "https://catalog.dataplatform-yamanashi.jp/dataset/kuma1"
 TERMS_URL = "https://www.pref.yamanashi.jp/opendata/kiyaku.html"
 
-# 山梨県オープンデータ利用規約は、加工して使う場合に「加工して作成」の明記を求めている。
-# このアプリは市町村での絞り込みと表記ゆれの集約を行うため、加工にあたる。
-SOURCE_TEXT = (
-    "出典：山梨県 森林環境部 自然共生推進課"
-    f"『ツキノワグマ出没・目撃情報（令和8年度／直近1か月）』（[やまなしデータプラットフォーム]({DATASET_URL})"
-    "・2026年8月7日取得）を加工して作成"
-    f"／利用条件：[山梨県オープンデータ利用規約]({TERMS_URL})（CC BY 4.0互換）"
-    "／このアプリは山梨県が作成したものではありません。"
-)
+def source_text(fetched_label: str) -> str:
+    """画面下の出所表示。取得日はデータと一緒に記録した値を使う。
+
+    山梨県オープンデータ利用規約は、加工して使う場合に「加工して作成」の明記を求めている。
+    このアプリは市町村での絞り込みと表記ゆれの集約を行うため、加工にあたる。
+    """
+
+    return (
+        "出典：山梨県 森林環境部 自然共生推進課"
+        f"『ツキノワグマ出没・目撃情報（令和8年度／直近1か月）』"
+        f"（[やまなしデータプラットフォーム]({DATASET_URL})・{fetched_label}取得）を加工して作成"
+        f"／利用条件：[山梨県オープンデータ利用規約]({TERMS_URL})（CC BY 4.0互換）"
+        "／このアプリは山梨県が作成したものではありません。"
+    )
 
 # 吹き出しの中に入れる短い出典。画面下の詳しい出所表示とは別に、
 # カード単体を見ても情報源が分かるようにする（指示書§11の必須項目）。
@@ -164,6 +195,11 @@ except (OSError, ValueError) as error:
 
 period = data_period(records)
 reference = reference_date(records)
+
+# 取得日はデータと一緒に記録した値から決める。読めなければ「取得日不明」と出す。
+# 分からないのに日付を出すと、いつのデータかを誤って伝えることになる。
+fetched = fetched_at(FETCHED_AT_PATH)
+fetched_label = japanese_date(fetched) if fetched else UNKNOWN_FETCHED_AT
 
 # プルダウンに並べる市町村は、期間を変えても増減させない。
 # 選んでいた市町村が消えて選択が戻ってしまうのを避けるため。
@@ -242,7 +278,7 @@ with st.sidebar:
     counts_note = "プルダウンの件数は、選んだ期間の目撃の総数です。地図に出せないものも含みます。"
     if reference:
         counts_note += (
-            f"期間は{reference.year}年{reference.month}月{reference.day}日"
+            f"期間は{japanese_date(reference)}"
             "（記録の中でいちばん新しい日）から数えています。"
         )
     st.markdown(note_html(counts_note), unsafe_allow_html=True)
@@ -362,10 +398,10 @@ st_folium(
     bear_map, height=MAP_HEIGHT, use_container_width=True, returned_objects=[]
 )
 
-st.caption("地図の拡大縮小は、左上の + − ボタンかダブルクリックで行えます。")
-st.caption("地図上の位置は、目撃地点のおおよその目安です。")
-st.caption(
-    "吹き出しの「状況」は、山梨県が公開しているデータの記述をそのまま掲載しています。"
-    "個人や世帯を特定する目的では利用しないでください。"
-)
-st.caption(SOURCE_TEXT)
+st.caption("地図の拡大縮小は、右下の + − ボタンかダブルクリックで行えます。")
+
+# 免責は開かなくても読める場所に出す。「この地図について」にも詳しい版を置くが、
+# 安全に関わる注意を、開かないと読めない場所だけに置かない。
+st.markdown(disclaimer_html(), unsafe_allow_html=True)
+
+st.caption(source_text(fetched_label))

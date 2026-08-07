@@ -10,10 +10,13 @@ from data_utils import (
     PERIOD_CHOICES,
     PERIOD_SEASON,
     available_municipalities,
+    base_municipality,
     coordinate_bounds,
     data_period,
     date_label,
     days_ago,
+    fetched_at,
+    japanese_date,
     days_ago_label,
     duplicate_numbers,
     filter_by_municipality,
@@ -72,9 +75,13 @@ class LoadRecordsTest(unittest.TestCase):
         self.assertEqual("", records[3]["目撃市町村"])
 
     def test_real_data_can_be_loaded(self):
-        records = load_all_records(REAL_FILES)
+        """件数は日々変わる。数を決め打ちせず、2ファイルの合計と一致することを見る。"""
 
-        self.assertEqual(160, len(records))
+        records = load_all_records(REAL_FILES)
+        each = [len(load_records(path)) for path in REAL_FILES]
+
+        self.assertGreater(len(records), 0)
+        self.assertEqual(sum(each), len(records))
 
     def test_missing_required_column_is_reported(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -147,14 +154,30 @@ class CoordinateTest(unittest.TestCase):
         self.assertNotIn("緯度数値", records[1])
 
     def test_real_data_split(self):
+        """どの行が欠けるかは日々変わる。件数ではなく分け方の正しさを見る。"""
+
         records = load_all_records(REAL_FILES)
 
         mappable, unmappable = split_by_coordinates(records)
 
-        self.assertEqual(156, len(mappable))
-        self.assertEqual(
-            ["14", "15", "97", "124"], [record["No."] for record in unmappable]
-        )
+        self.assertEqual(len(records), len(mappable) + len(unmappable))
+
+        for record in mappable:
+            with self.subTest(number=record["No."], side="地図に出せる"):
+                self.assertTrue(
+                    is_inside_yamanashi(record["緯度数値"], record["経度数値"])
+                )
+
+        for record in unmappable:
+            latitude = parse_coordinate(record["緯度"])
+            longitude = parse_coordinate(record["経度"])
+            usable = (
+                latitude is not None
+                and longitude is not None
+                and is_inside_yamanashi(latitude, longitude)
+            )
+            with self.subTest(number=record["No."], side="地図に出せない"):
+                self.assertFalse(usable)
 
 
 class CoordinateBoundsTest(unittest.TestCase):
@@ -182,11 +205,18 @@ class CoordinateBoundsTest(unittest.TestCase):
         self.assertIsNone(coordinate_bounds([]))
 
     def test_real_municipality_bounds_stay_inside_yamanashi(self):
+        """どの市町村が最多かは日々変わる。件数がいちばん多いところで確かめる。"""
+
         records = load_all_records(REAL_FILES)
         mappable, _ = split_by_coordinates(records)
-        minobu = filter_by_municipality(mappable, "身延町")
+        busiest = max(
+            available_municipalities(mappable),
+            key=lambda name: len(filter_by_municipality(mappable, name)),
+        )
 
-        (south, west), (north, east) = coordinate_bounds(minobu)
+        (south, west), (north, east) = coordinate_bounds(
+            filter_by_municipality(mappable, busiest)
+        )
 
         self.assertTrue(35.0 <= south <= north <= 36.5)
         self.assertTrue(138.0 <= west <= east <= 139.5)
@@ -232,9 +262,15 @@ class MunicipalityTest(unittest.TestCase):
 
         names = available_municipalities(records)
 
-        self.assertEqual(25, len(names))
+        counts = municipality_counts(records)
+
+        self.assertEqual(sorted(counts), names)
         self.assertNotIn("富士河口湖", names)
-        self.assertEqual(9, len(filter_by_municipality(records, "富士河口湖町")))
+        for name in names:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    counts[name], len(filter_by_municipality(records, name))
+                )
 
 
 class SightingDetailsTest(unittest.TestCase):
@@ -305,15 +341,33 @@ class MunicipalityCountsTest(unittest.TestCase):
 
         counts = municipality_counts(records)
 
-        self.assertEqual(9, counts["富士河口湖町"])
+        merged = sum(
+            1 for r in records if base_municipality(r["目撃市町村"]) == "富士河口湖"
+        )
+
+        self.assertEqual(merged, counts["富士河口湖町"])
         self.assertNotIn("富士河口湖", counts)
 
     def test_counts_include_records_that_cannot_be_mapped(self):
-        """西桂町の1件は座標が範囲外だが、目撃の総数としては数える。"""
+        """座標が使えない目撃も、目撃の総数としては数える。"""
 
         records = load_all_records(REAL_FILES)
+        _, unmappable = split_by_coordinates(records)
+        counts = municipality_counts(records)
 
-        self.assertEqual(1, municipality_counts(records)["西桂町"])
+        for record in unmappable:
+            name = record["目撃市町村"].strip()
+            if not name:
+                continue
+            same = sum(
+                1
+                for r in records
+                if base_municipality(r["目撃市町村"]) == base_municipality(name)
+            )
+            with self.subTest(number=record["No."]):
+                self.assertEqual(same, counts[[
+                    n for n in counts if base_municipality(n) == base_municipality(name)
+                ][0]])
 
     def test_blank_municipality_is_not_counted(self):
         records = load_all_records([PART1, PART2])
@@ -335,7 +389,11 @@ class DataPeriodTest(unittest.TestCase):
     def test_real_data_period(self):
         records = load_all_records(REAL_FILES)
 
-        self.assertEqual(("2026年4月2日", "2026年8月5日"), data_period(records))
+        first, last = data_period(records)
+        dates = [d for d in map(record_date, records) if d is not None]
+
+        self.assertEqual(japanese_date(min(dates)), first)
+        self.assertEqual(japanese_date(max(dates)), last)
 
     def test_period_ignores_unreadable_dates(self):
         records = [
@@ -360,8 +418,9 @@ class ReferenceDateTest(unittest.TestCase):
         """今日ではなくデータ内の最新日を基準にする。日が経っても色分けが崩れない。"""
 
         records = load_all_records(REAL_FILES)
+        dates = [d for d in map(record_date, records) if d is not None]
 
-        self.assertEqual(datetime(2026, 8, 5), reference_date(records))
+        self.assertEqual(max(dates), reference_date(records))
 
     def test_reference_ignores_unreadable_dates(self):
         records = [make_record("令和8年4月2日"), make_record("2026/5/1")]
@@ -513,6 +572,62 @@ class PeriodFilterTest(unittest.TestCase):
         self.assertEqual(datetime(2026, 4, 2), record_date(make_record("2026/4/2")))
 
 
+class FetchedAtTest(unittest.TestCase):
+    """取得日は画面の出所表示に出る。分からないのに日付を出さない。"""
+
+    def test_the_recorded_date_is_read(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "fetched_at.txt"
+            path.write_text("2026-08-07\n", encoding="utf-8")
+
+            self.assertEqual(datetime(2026, 8, 7), fetched_at(path))
+
+    def test_a_missing_file_is_not_an_error(self):
+        """ファイルが無いだけでアプリを止めない。「取得日不明」と出す。"""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.assertIsNone(fetched_at(Path(temp_dir) / "ない.txt"))
+
+    def test_a_broken_value_gives_nothing(self):
+        for text in ("", "きのう", "2026/08/07", "2026-13-01"):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as temp_dir:
+                path = Path(temp_dir) / "fetched_at.txt"
+                path.write_text(text, encoding="utf-8")
+
+                self.assertIsNone(fetched_at(path))
+
+    def test_the_repository_has_a_readable_date(self):
+        """日付そのものは更新のたびに変わる。読める形かどうかだけを見る。"""
+
+        value = fetched_at(ROOT / "data" / "fetched_at.txt")
+
+        self.assertIsInstance(value, datetime)
+
+    def test_the_date_is_not_taken_from_the_file_timestamp(self):
+        """更新日時は`git clone`でクローン時刻になる。取得日として使えない。"""
+
+        source = (ROOT / "data_utils.py").read_text(encoding="utf-8")
+
+        self.assertIn("def fetched_at", source)
+        self.assertNotIn("st_mtime", source)
+        self.assertNotIn("getmtime", source)
+
+
+class JapaneseDateTest(unittest.TestCase):
+    def test_it_formats_without_leading_zeros(self):
+        self.assertEqual("2026年8月7日", japanese_date(datetime(2026, 8, 7)))
+        self.assertEqual("2026年12月31日", japanese_date(datetime(2026, 12, 31)))
+
+    def test_the_period_uses_the_same_formatting(self):
+        """収録期間と取得日で書き方が違うと、同じ日付が別物に見える。"""
+
+        records = load_all_records(REAL_FILES)
+
+        for label in data_period(records):
+            with self.subTest(label=label):
+                self.assertRegex(label, r"^\d{4}年\d{1,2}月\d{1,2}日$")
+
+
 class SortByDateTest(unittest.TestCase):
     def test_newest_comes_first(self):
         records = [
@@ -579,9 +694,10 @@ class SortByDateTest(unittest.TestCase):
 
     def test_real_data_runs_from_newest_to_oldest(self):
         records = sort_by_date_desc(load_all_records(REAL_FILES))
+        dates = [d for d in map(record_date, records) if d is not None]
 
-        self.assertEqual("2026/8/5", records[0]["年月日"])
-        self.assertEqual("2026/4/2", records[-1]["年月日"])
+        self.assertEqual(max(dates), record_date(records[0]))
+        self.assertEqual(min(dates), record_date(records[-1]))
 
     def test_real_data_never_goes_back_in_time(self):
         records = sort_by_date_desc(load_all_records(REAL_FILES))
@@ -594,15 +710,26 @@ class SortByDateTest(unittest.TestCase):
 class EmptyResultTest(unittest.TestCase):
     """0件の案内を出す条件を、画面ではなくデータ側で確かめる。"""
 
-    def test_municipality_whose_only_sighting_has_no_usable_coordinates(self):
+    def test_a_municipality_can_have_sightings_but_nothing_to_show(self):
+        """0件の案内を出す場面が実データにあるか。どの市町村かは日々変わる。"""
+
         records = load_all_records(REAL_FILES)
         mappable, unmappable = split_by_coordinates(records)
 
-        shown = filter_by_municipality(mappable, "西桂町")
-        hidden = filter_by_municipality(unmappable, "西桂町")
+        empty = [
+            name
+            for name in available_municipalities(records)
+            if not filter_by_municipality(mappable, name)
+            and filter_by_municipality(unmappable, name)
+        ]
 
-        self.assertEqual(0, len(shown))
-        self.assertEqual(1, len(hidden))
+        if not empty:
+            self.skipTest("今のデータには、全件が地図に出せない市町村がない")
+
+        for name in empty:
+            with self.subTest(name=name):
+                self.assertEqual(0, len(filter_by_municipality(mappable, name)))
+                self.assertGreater(len(filter_by_municipality(unmappable, name)), 0)
 
     def test_every_unmappable_record_still_belongs_to_a_municipality(self):
         records = load_all_records(REAL_FILES)
