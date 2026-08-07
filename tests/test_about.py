@@ -4,6 +4,7 @@
 集めていないものを「集めている」と書かない。逆も書かない。
 """
 
+import re
 import unittest
 from pathlib import Path
 
@@ -98,8 +99,13 @@ class AboutTextTest(unittest.TestCase):
             with self.subTest(builder=builder):
                 self.assertIn(builder, self.source)
 
-    def test_the_contact_url_can_be_set_in_one_place(self):
-        self.assertIn('CONTACT_URL = ""', self.source)
+    def test_the_contact_url_is_defined_in_one_place(self):
+        """設定箇所が散らばると、片方だけ直して食い違う。"""
+
+        definitions = re.findall(r"^CONTACT_URL = ", self.source, re.M)
+
+        self.assertEqual(1, len(definitions))
+        self.assertIn("contact_markdown(CONTACT_URL)", self.source)
 
     def test_it_no_longer_claims_there_is_no_auto_update(self):
         """毎日の更新を用意したので、この記述は実態と違う。"""
