@@ -79,7 +79,7 @@ UI改善フェーズで追加した完成条件:
 期間での絞り込みと目撃の一覧表示は、当初「作らないもの」に入れていたが、依頼を受けて完成条件へ移した。
 
 インターネットへの公開も、当初は「作らないもの」に入れていた。準備が整い、人間が公開してよいと判断したため完成条件へ移した（2026年8月8日）。
-公開先はGitHub（hroabe/yamanashi-bear-map・public）とStreamlit Community Cloud。
+公開先はGitHub（shingen-py/sample_20260808・public）とStreamlit Community Cloud。
 
 未確定（人間の判断待ち）:
 

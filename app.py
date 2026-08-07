@@ -94,7 +94,7 @@ MUNICIPALITY_KEY = "selected_municipality"
 
 # 連絡先。公開する前にGitHubのIssuesのURLを入れる。
 # 空のままだと、画面に「未設定」と出る。
-CONTACT_URL = "https://github.com/hroabe/yamanashi-bear-map/issues"
+CONTACT_URL = "https://github.com/shingen-py/sample_20260808/issues"
 
 ABOUT_TEXT = "\n\n".join(
     [
