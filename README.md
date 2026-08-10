@@ -1,6 +1,6 @@
 # 山梨クマ目撃マップ（市町村別）
 
-**公開中: https://ckheugq8rgva6numeypudu.streamlit.app/**
+**公開中: https://ckheugq8rgva6numeypudu.streamlit.app**
 
 山梨県在住の保護者が、県内のクマ目撃データを使って、市町村と期間を選び、目撃地点と件数・日付・状況を地図で確認できるアプリです。
 
