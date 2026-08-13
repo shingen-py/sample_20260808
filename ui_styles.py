@@ -797,6 +797,12 @@ EXTERNAL_HOSTS = (
 
 CONTACT_UNSET_TEXT = "連絡先は公開時に設定します（現在は未設定）。"
 
+# アプリのサーバーが、最新データを読みに行く先（`remote_data.py`）。
+# 上の`EXTERNAL_HOSTS`とは別に書く。あちらはブラウザが直接つなぐ相手で、
+# 利用者のIPアドレスが渡る。こちらはサーバーがつなぐので、渡らない。
+# 同じ一覧に混ぜると、利用者に渡る情報を実際より多く見せることになる。
+SERVER_FETCH_HOST = "raw.githubusercontent.com"
+
 
 def privacy_markdown(hosts: tuple[tuple[str, str], ...] = EXTERNAL_HOSTS) -> str:
     """プライバシーについての説明。
@@ -814,6 +820,10 @@ def privacy_markdown(hosts: tuple[tuple[str, str], ...] = EXTERNAL_HOSTS) -> str
         "- ただし画面を開くと、次の外部サーバーへ通信します。"
         "**利用者のIPアドレスとブラウザの情報が、これらの相手に渡ります**\n"
         f"{lines}\n"
+        "- 画面に出すデータは、アプリのサーバーが"
+        f"`{SERVER_FETCH_HOST}`（GitHub）から読み込みます。"
+        "**これはサーバーからの通信です。利用者のブラウザは接続せず、"
+        "利用者のIPアドレスがGitHubへ渡ることはありません**\n"
         "- 画面を配信している事業者が、接続の記録を保持する場合があります\n"
     )
 

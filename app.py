@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 import folium
@@ -38,6 +39,7 @@ from data_utils import (
     tone_ranges,
 )
 from map_overlays import MARKER_INDEX_OPTION, MapControls, SightingListControl
+from remote_data import TTL_SECONDS, RemoteDataError, load_remote
 from ui_styles import (
     CLUSTER_ICON_JS,
     CLUSTER_OPTIONS,
@@ -147,9 +149,26 @@ st.set_page_config(
 st.markdown(PAGE_STYLES, unsafe_allow_html=True)
 
 
-@st.cache_data
-def get_records() -> list[dict[str, str]]:
-    return load_all_records(DATA_PATHS)
+@st.cache_data(ttl=TTL_SECONDS, show_spinner=False)
+def get_records() -> tuple[list[dict[str, str]], datetime | None, str]:
+    """目撃データと取得日を返す。読めた元も一緒に返す。
+
+    まずリポジトリから読む。デプロイした日のファイルを持ち続けても、
+    毎日の更新が画面に出るようにするため（理由は`remote_data.py`）。
+
+    読めなければ同梱のファイルへ戻る。そのとき取得日も同梱のものを使う。
+    データと取得日は必ず同じ元から取る。混ぜると、画面に出る取得日が
+    実際に表示しているデータの日付と食い違ってしまう。
+
+    失敗も同じ時間だけ覚えておく。覚えないと、GitHubが落ちている間、
+    画面を触るたびに取得を試して待たされることになる。
+    """
+
+    try:
+        records, fetched = load_remote()
+        return records, fetched, ""
+    except RemoteDataError as error:
+        return load_all_records(DATA_PATHS), fetched_at(FETCHED_AT_PATH), str(error)
 
 
 def popup_html(record: dict[str, object], days: int | None) -> str:
@@ -185,7 +204,7 @@ def render_header(updated_label: str) -> None:
 header_slot = st.container()
 
 try:
-    records = get_records()
+    records, fetched, remote_error = get_records()
 except (OSError, ValueError) as error:
     with header_slot:
         render_header("―")
@@ -198,7 +217,6 @@ reference = reference_date(records)
 
 # 取得日はデータと一緒に記録した値から決める。読めなければ「取得日不明」と出す。
 # 分からないのに日付を出すと、いつのデータかを誤って伝えることになる。
-fetched = fetched_at(FETCHED_AT_PATH)
 fetched_label = japanese_date(fetched) if fetched else UNKNOWN_FETCHED_AT
 
 # プルダウンに並べる市町村は、期間を変えても増減させない。
@@ -403,5 +421,17 @@ st.caption("地図の拡大縮小は、右下の + − ボタンかダブルク�
 # 免責は開かなくても読める場所に出す。「この地図について」にも詳しい版を置くが、
 # 安全に関わる注意を、開かないと読めない場所だけに置かない。
 st.markdown(disclaimer_html(), unsafe_allow_html=True)
+
+# 同梱のファイルへ戻ったときは、そのことを出す。
+# 黙って古いデータを出すと、最新だと思って読まれてしまう。
+if remote_error:
+    st.markdown(
+        note_html(
+            "最新のデータを読み込めなかったため、"
+            f"アプリに同梱されたデータ（{fetched_label}取得）を表示しています。"
+            "しばらくしてから再読み込みしてください。"
+        ),
+        unsafe_allow_html=True,
+    )
 
 st.caption(source_text(fetched_label))

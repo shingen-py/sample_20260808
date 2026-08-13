@@ -102,6 +102,8 @@ python3 -m venv .venv
 
 **プライバシーの節には、画面を開いたときに通信する外部サーバーを名前で書いています。** この一覧が実際とずれると書いてあることが嘘になるため、`tests/test_external_hosts.py`が実物と突き合わせます。増減するとテストが落ちます。
 
+**ブラウザがつなぐ相手と、サーバーがつなぐ相手は分けて書いています。** 前者（地図タイルなど）には利用者のIPアドレスが渡りますが、後者（データを読む`raw.githubusercontent.com`）はサーバーからの通信なので渡りません。同じ一覧に混ぜると、利用者に渡る情報を実際より多く見せることになります。`tests/test_remote_data.py`が、混ざっていないことを確かめます。
+
 **連絡先は`app.py`の`CONTACT_URL`で設定します。** 空のときは画面に「現在は未設定」と出ます。
 
 ## データを取り直す
@@ -145,7 +147,28 @@ python3 -m venv .venv
 | 公開日 | 2026年8月8日 |
 | データの更新 | 毎日 6:00（JST）。GitHub Actions が取り直し、変更があればコミットする |
 
-**データが更新されると、Streamlit Community Cloud がアプリを再起動します。** 朝の更新直後は、数十秒ほど画面が「起動準備中」になることがあります。
+### 新しいデータが画面に出るまで
+
+**アプリは、起動時に置かれたファイルではなく、リポジトリのファイルを直接読みます**（`remote_data.py`）。
+
+```text
+GitHub Actions が data/ を更新
+  ↓
+アプリが raw.githubusercontent.com から読む（1時間ごと）
+  ↓
+画面が新しくなる
+```
+
+**なぜこの作りなのか。** 本来 Streamlit Community Cloud は、GitHubへのpushをWebhookで受け取ってアプリを再起動し、新しいコミットを取り直します。ところがこのリポジトリには**Webhookが作られていません**（`gh api repos/shingen-py/sample_20260808/hooks`が`[]`を返します）。組織所有のリポジトリで、Streamlit側がフックを作れなかったためです。
+
+その結果、コンテナはデプロイした日のチェックアウトを持ち続け、**リポジトリのデータだけが毎日新しくなり、画面は古いまま**という状態になりました。再起動に頼らず、アプリ自身が読みに行く形にして解消しています。
+
+- 覚えておく時間は**1時間**（`remote_data.TTL_SECONDS`）。データは1日1回しか変わらないので、これで十分新しい
+- **読めなかったときは同梱のデータへ戻り、そのことを画面に出します。** 黙って古いデータを出すと、最新だと思って読まれてしまいます
+- 戻ったときの取得日は**同梱のもの**を使います。データと取得日は必ず同じ元から取り、ちぐはぐにしません
+- 取れた中身は、`scripts/fetch_data.py`と同じ基準で確かめてから使います。**空でない／UTF-8で読める／必須列がそろう／目撃が1件以上ある／地図に出せる座標が1件以上ある**
+
+Webhookが直れば再起動でも新しくなりますが、この作りはそれとは無関係に動きます。**公開先のリポジトリを変えるときは`remote_data.py`の`REPOSITORY`を直してください。**
 
 ## 公開するときの手順（記録）
 
@@ -192,18 +215,19 @@ python3 -m venv .venv
 
 ```powershell
 .venv\Scripts\python -m unittest discover -s tests -v
-.venv\Scripts\python -m py_compile app.py data_utils.py ui_styles.py map_overlays.py
+.venv\Scripts\python -m py_compile app.py data_utils.py ui_styles.py map_overlays.py remote_data.py
 ```
 
-現在283件のテストがあります。
+現在304件のテストがあります。
 
 | ファイル | 件数 | 何を見ているか |
 |---|---:|---|
-| `tests/test_data_utils.py` | 70 | 読み込み、座標、市町村、日付、期間、並び順 |
+| `tests/test_data_utils.py` | 77 | 読み込み、座標、市町村、日付、期間、並び順 |
 | `tests/test_map.py` | 44 | タイル、マーカー、クラスタ、Popup、地図上の操作 |
 | `tests/test_ui_styles.py` | 34 | デザイントークン、ヘッダー、凡例、レスポンシブ |
 | `tests/test_sighting_list.py` | 32 | 一覧のHTML、行クリック、狭い画面での折りたたみ |
 | `tests/test_accessibility.py` | 23 | コントラスト比、タップ領域、focus、動きの抑制 |
+| `tests/test_remote_data.py` | 21 | **リポジトリから読む処理。おかしな中身を通さないか** |
 | `tests/test_fetch_data.py` | 16 | 取れたデータを差し替えてよいかの判断 |
 | `tests/test_about.py` | 15 | プライバシー・連絡先・免責の文面 |
 | `tests/test_workflow.py` | 14 | 毎日の更新の設定 |
@@ -276,6 +300,7 @@ python3 -m venv .venv
 | `PROMPTS.md` | 順番に使えるAIへの依頼文 |
 | `app.py` | 画面。絞り込み、地図、ピン、吹き出し |
 | `data_utils.py` | CSVの読み込み、座標、市町村、日付の処理 |
+| `remote_data.py` | 公開先のリポジトリから最新データを読む。読めた中身を確かめる |
 | `ui_styles.py` | 色・余白・マーカーのSVG・CSS・一覧のHTML。見た目の値はここだけに書く |
 | `map_overlays.py` | 地図の上に置く操作（一覧・チップ・戻るボタン）。foliumの部品として作る |
 | `.streamlit/config.toml` | 画面の配色。`ui_styles.py`の色と同じ値にすること |

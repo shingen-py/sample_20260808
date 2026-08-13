@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import csv
+import io
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
@@ -52,29 +53,38 @@ PERIOD_DAYS = {PERIOD_7: 7, PERIOD_30: 30}
 FISCAL_YEAR_START_MONTH = 4
 
 
-def load_records(csv_path: str | Path) -> list[dict[str, str]]:
-    """UTF-8(BOM付き)のCSVを1つ読み、必須列を確認する。
+def load_records_from_text(text: str) -> list[dict[str, str]]:
+    """CSVの中身を読み、必須列を確認する。
+
+    読み込みの本体をここに置く。手元のファイルから読んでも、
+    ネットワークから取った中身を読んでも、同じ判定にするため。
+    片方だけ緩い判定になると、画面に出せない中身を通してしまう。
 
     値は前後の空白だけを取り除き、内容は変えない。
     `No.`の重複はここでは判定しない。`DATA.md`のとおり、
     重複した目撃も消さずに残し、`duplicate_numbers`で検知する。
     """
 
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    fields = set(reader.fieldnames or [])
+    missing = REQUIRED_FIELDS - fields
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise ValueError(f"CSVに必須列がありません: {names}")
+
+    return [
+        {key: (value or "").strip() for key, value in row.items()}
+        for row in reader
+    ]
+
+
+def load_records(csv_path: str | Path) -> list[dict[str, str]]:
+    """UTF-8(BOM付き)のCSVを1つ読み、必須列を確認する。"""
+
     path = Path(csv_path)
+    # `newline=""`はcsvモジュールの決まり。引用符の中の改行を壊さない。
     with path.open(encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        fields = set(reader.fieldnames or [])
-        missing = REQUIRED_FIELDS - fields
-        if missing:
-            names = ", ".join(sorted(missing))
-            raise ValueError(f"CSVに必須列がありません: {names}")
-
-        records = [
-            {key: (value or "").strip() for key, value in row.items()}
-            for row in reader
-        ]
-
-    return records
+        return load_records_from_text(file.read())
 
 
 def load_all_records(csv_paths: Iterable[str | Path]) -> list[dict[str, str]]:
@@ -267,12 +277,22 @@ def fetched_at(path: str | Path) -> datetime | None:
     """
 
     try:
-        text = Path(path).read_text(encoding="utf-8").strip()
+        text = Path(path).read_text(encoding="utf-8")
     except OSError:
         return None
 
+    return parse_fetched_at(text)
+
+
+def parse_fetched_at(text: str) -> datetime | None:
+    """`YYYY-MM-DD`の1行を日付にする。読めなければNoneを返す。
+
+    `fetched_at`から切り出してある。ファイルからでも、
+    ネットワークから取った中身からでも同じ読み方にするため。
+    """
+
     try:
-        return datetime.strptime(text, "%Y-%m-%d")
+        return datetime.strptime(text.strip(), "%Y-%m-%d")
     except ValueError:
         return None
 
